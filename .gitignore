@@ -7,9 +7,18 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Frontend Node modules
+taskapp/node_modules
+
+# Backend Node modules
+Backend/node_modules
+
+# Build outputs
+frontend/dist
+backend/dist
+frontend/dist-ssr
+
+# Local configuration
 *.local
 
 # Editor directories and files
