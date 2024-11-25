@@ -1,199 +1,170 @@
-require('dotenv').config();
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const Groq = require('groq-sdk');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+'use strict';
 
-const app = express();
-app.use(cors());
-app.use(bodyParser.json());
+const stringify = require('./lib/stringify');
+const compile = require('./lib/compile');
+const expand = require('./lib/expand');
+const parse = require('./lib/parse');
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+/**
+ * Expand the given pattern or create a regex-compatible string.
+ *
+ * ```js
+ * const braces = require('braces');
+ * console.log(braces('{a,b,c}', { compile: true })); //=> ['(a|b|c)']
+ * console.log(braces('{a,b,c}')); //=> ['a', 'b', 'c']
+ * ```
+ * @param {String} `str`
+ * @param {Object} `options`
+ * @return {String}
+ * @api public
+ */
 
-// Industry Databases Connections
-const techIndustryDb = mongoose.createConnection('mongodb://localhost:27017/tech-industry', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+const braces = (input, options = {}) => {
+  let output = [];
 
-const constructionIndustryDb = mongoose.createConnection('mongodb://localhost:27017/construction', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
-
-const healthcareIndustryDb = mongoose.createConnection('mongodb://localhost:27017/healthcare', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
-
-const fireserviceIndustryDb = mongoose.createConnection('mongodb://localhost:27017/fireservice', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
-
-// Task Schema
-const taskSchema = new mongoose.Schema({
-  title: String,
-  description: String,
-  status: {
-    type: String,
-    enum: ['todo', 'drafting', 'inReview', 'done'],
-    default: 'todo',
-  },
-  assignedTo: String,
-  createdAt: { type: Date, default: Date.now },
-  employeeName: String,
-  employeeEmail: String,
-  taskName: String,
-  dueDate: Date,
-  todayDate: Date,
-  userId: String,
-});
-
-// Industry Models
-const TechTask = techIndustryDb.model('TechTask', taskSchema, 'tasks');
-const ConstructionTask = constructionIndustryDb.model('ConstructionTask', taskSchema);
-const HealthTask = healthcareIndustryDb.model('HealthTask', taskSchema);
-const FireServiceTask = fireserviceIndustryDb.model('FireServiceTask', taskSchema);
-
-// Dynamic User Database Registration
-app.post('/register-user', async (req, res) => {
-  const { email, password, role } = req.body;
-  const dbName = `db_${email.replace(/[@.]/g, '_')}`; // Create a unique database name
-
-  try {
-    // Log database creation attempt
-    console.log(`Creating new database for user ${email} with dbName: ${dbName}`);
-
-    // Create a new connection for the user's database
-    const newDbConnection = mongoose.createConnection(`mongodb://localhost:27017/${dbName}`, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-
-    // Define a model for tasks in this new user database
-    const UserTask = newDbConnection.model('UserTask', taskSchema, 'tasks');
-
-    console.log(`Database ${dbName} created successfully.`);
-    res.json({ success: true, dbName });
-  } catch (error) {
-    console.error('Error creating new database:', error.message, error.stack);
-    res.status(500).json({ success: false, error: 'Error creating new database.' });
+  if (Array.isArray(input)) {
+    for (const pattern of input) {
+      const result = braces.create(pattern, options);
+      if (Array.isArray(result)) {
+        output.push(...result);
+      } else {
+        output.push(result);
+      }
+    }
+  } else {
+    output = [].concat(braces.create(input, options));
   }
-});
 
-
-// Industry Endpoints
-app.get('/tech-tasks/:userId', async (req, res) => {
-  const tasks = await TechTask.find({ userId: req.params.userId });
-  res.json(tasks);
-});
-
-app.post('/tech-tasks', async (req, res) => {
-  const task = new TechTask(req.body);
-  await task.save();
-  res.json(task);
-});
-
-app.put('/tech-tasks/:id', async (req, res) => {
-  const task = await TechTask.findByIdAndUpdate(req.params.id, req.body, { new: true });
-  res.json(task);
-});
-
-app.delete('/tech-tasks/:id', async (req, res) => {
-  await TechTask.findByIdAndDelete(req.params.id);
-  res.json({ message: 'Task deleted' });
-});
-
-// Construction Endpoints
-app.get('/construction/:userId', async (req, res) => {
-  const tasks = await ConstructionTask.find({ userId: req.params.userId });
-  res.json(tasks);
-});
-
-app.post('/construction', async (req, res) => {
-  const task = new ConstructionTask(req.body);
-  await task.save();
-  res.json(task);
-});
-
-app.put('/construction/:id', async (req, res) => {
-  const task = await ConstructionTask.findByIdAndUpdate(req.params.id, req.body, { new: true });
-  res.json(task);
-});
-
-app.delete('/construction/:id', async (req, res) => {
-  await ConstructionTask.findByIdAndDelete(req.params.id);
-  res.json({ message: 'Task deleted' });
-});
-
-// Healthcare Endpoints
-app.get('/healthcare/:userId', async (req, res) => {
-  const tasks = await HealthTask.find({ userId: req.params.userId });
-  res.json(tasks);
-});
-
-app.post('/healthcare', async (req, res) => {
-  const task = new HealthTask(req.body);
-  await task.save();
-  res.json(task);
-});
-
-app.put('/healthcare/:id', async (req, res) => {
-  const task = await HealthTask.findByIdAndUpdate(req.params.id, req.body, { new: true });
-  res.json(task);
-});
-
-app.delete('/healthcare/:id', async (req, res) => {
-  await HealthTask.findByIdAndDelete(req.params.id);
-  res.json({ message: 'Task deleted' });
-});
-
-// Fire Service Endpoints
-app.get('/fireservice/:userId', async (req, res) => {
-  const tasks = await FireServiceTask.find({ userId: req.params.userId });
-  res.json(tasks);
-});
-
-app.post('/fireservice', async (req, res) => {
-  const task = new FireServiceTask(req.body);
-  await task.save();
-  res.json(task);
-});
-
-app.put('/fireservice/:id', async (req, res) => {
-  const task = await FireServiceTask.findByIdAndUpdate(req.params.id, req.body, { new: true });
-  res.json(task);
-});
-
-app.delete('/fireservice/:id', async (req, res) => {
-  await FireServiceTask.findByIdAndDelete(req.params.id);
-  res.json({ message: 'Task deleted' });
-});
-
-// GROQ Chat API Endpoint
-app.post('/ask-query', async (req, res) => {
-  const { query } = req.body;
-  try {
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: query }],
-      model: 'llama3-8b-8192',
-    });
-    res.json({ response: chatCompletion.choices[0]?.message?.content || 'No response' });
-  } catch (error) {
-    res.status(500).json({ error: 'Error processing query' });
+  if (options && options.expand === true && options.nodupes === true) {
+    output = [...new Set(output)];
   }
-});
+  return output;
+};
 
-// Proxy for /api/chat
-app.use('/api/chat', createProxyMiddleware({
-  target: 'http://localhost:5001',
-  changeOrigin: true,
-}));
+/**
+ * Parse the given `str` with the given `options`.
+ *
+ * ```js
+ * // braces.parse(pattern, [, options]);
+ * const ast = braces.parse('a/{b,c}/d');
+ * console.log(ast);
+ * ```
+ * @param {String} pattern Brace pattern to parse
+ * @param {Object} options
+ * @return {Object} Returns an AST
+ * @api public
+ */
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+braces.parse = (input, options = {}) => parse(input, options);
+
+/**
+ * Creates a braces string from an AST, or an AST node.
+ *
+ * ```js
+ * const braces = require('braces');
+ * let ast = braces.parse('foo/{a,b}/bar');
+ * console.log(stringify(ast.nodes[2])); //=> '{a,b}'
+ * ```
+ * @param {String} `input` Brace pattern or AST.
+ * @param {Object} `options`
+ * @return {Array} Returns an array of expanded values.
+ * @api public
+ */
+
+braces.stringify = (input, options = {}) => {
+  if (typeof input === 'string') {
+    return stringify(braces.parse(input, options), options);
+  }
+  return stringify(input, options);
+};
+
+/**
+ * Compiles a brace pattern into a regex-compatible, optimized string.
+ * This method is called by the main [braces](#braces) function by default.
+ *
+ * ```js
+ * const braces = require('braces');
+ * console.log(braces.compile('a/{b,c}/d'));
+ * //=> ['a/(b|c)/d']
+ * ```
+ * @param {String} `input` Brace pattern or AST.
+ * @param {Object} `options`
+ * @return {Array} Returns an array of expanded values.
+ * @api public
+ */
+
+braces.compile = (input, options = {}) => {
+  if (typeof input === 'string') {
+    input = braces.parse(input, options);
+  }
+  return compile(input, options);
+};
+
+/**
+ * Expands a brace pattern into an array. This method is called by the
+ * main [braces](#braces) function when `options.expand` is true. Before
+ * using this method it's recommended that you read the [performance notes](#performance))
+ * and advantages of using [.compile](#compile) instead.
+ *
+ * ```js
+ * const braces = require('braces');
+ * console.log(braces.expand('a/{b,c}/d'));
+ * //=> ['a/b/d', 'a/c/d'];
+ * ```
+ * @param {String} `pattern` Brace pattern
+ * @param {Object} `options`
+ * @return {Array} Returns an array of expanded values.
+ * @api public
+ */
+
+braces.expand = (input, options = {}) => {
+  if (typeof input === 'string') {
+    input = braces.parse(input, options);
+  }
+
+  let result = expand(input, options);
+
+  // filter out empty strings if specified
+  if (options.noempty === true) {
+    result = result.filter(Boolean);
+  }
+
+  // filter out duplicates if specified
+  if (options.nodupes === true) {
+    result = [...new Set(result)];
+  }
+
+  return result;
+};
+
+/**
+ * Processes a brace pattern and returns either an expanded array
+ * (if `options.expand` is true), a highly optimized regex-compatible string.
+ * This method is called by the main [braces](#braces) function.
+ *
+ * ```js
+ * const braces = require('braces');
+ * console.log(braces.create('user-{200..300}/project-{a,b,c}-{1..10}'))
+ * //=> 'user-(20[0-9]|2[1-9][0-9]|300)/project-(a|b|c)-([1-9]|10)'
+ * ```
+ * @param {String} `pattern` Brace pattern
+ * @param {Object} `options`
+ * @return {Array} Returns an array of expanded values.
+ * @api public
+ */
+
+braces.create = (input, options = {}) => {
+  if (input === '' || input.length < 3) {
+    return [input];
+  }
+
+  return options.expand !== true
+    ? braces.compile(input, options)
+    : braces.expand(input, options);
+};
+
+/**
+ * Expose "braces"
+ */
+
+module.exports = braces;
